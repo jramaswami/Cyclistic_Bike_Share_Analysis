@@ -1,0 +1,383 @@
+---
+title: "Bike Share Project - Monthly Data"
+author: "Joseph Ramaswami"
+date: "2022-10-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Cyclistic is a bike sharing company.  They have three different pricing plans: single day, full-day pass, and annual membership.  Users of the first two plans are referred to as casual riders, the last as members.  Cyclistics financial analysts determined that annual memberships are more profitable.  Lily Moreno, CEO of Cyclistic, wants a marketing campaign to convert casual riders into members.  To this end, Ms. Morena would like the answer to the following three questions:
+
+1. How do annual members and casual riders use Cyclistic bikes differently?
+2. Why would casual riders buy Cyclistic annual memberships?
+3. How can Cyclistic use digital media to influence casual riders to become members?
+
+## Objective
+
+This report will answer the first question: How do annual members and casual riders use Cyclistic bikes
+differently?
+
+It will have the following deliverables:
+
+1. A clear statement of the business task
+2. A description of all data sources used
+3. Documentation of any cleaning or manipulation of data
+4. A summary of your analysis
+5. Supporting visualizations and key findings
+6. Your top three recommendations based on your analysi
+
+```{r Setup Environment}
+# Setup our environment.
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(knitr)
+```
+
+## Data
+
+The data consists of observations about each bike as it is checked out and checked back in.  The observations are stored in separate files for each calendar month.  We will work with the data from the previous 12 months.  This data is public data available under this [license](https://ride.divvybikes.com/data-license-agreement).
+
+### Data Dictionary
+
+```{r Data Dictionary}
+data_dictionary <- tribble(
+  ~Field, ~Type, ~Description,
+  "ride_id", "character", "Unique identifier for a ride.",
+  "rideable_type", "character", "A description of the type of bike: 'electric_bike', 'classic_bike', 'docked_bike'",
+  "started_at", "datetime", "Date and time ride started.",
+  "ended_at", "datetime", "Date and time ride ended.",
+  "start_station_name", "character", "Name of station where ride started.  Has a lot of missing values.",
+  "start_station_id", "character", "Unique identifier for station where ride started. Has a lot of missing values.",
+  "end_station_name", "character", "Name of station where ride ended.  Has a lot of missing values.",
+  "end_station_id", "character", "Unique identifier for station where ride ended. Has a lot of missing values.",
+  "start_lat", "double", "Latitidue where ride started.",
+  "start_lng", "double", "Longitude where ride started.",
+  "end_lat", "double", "Latitidue where ride ended.",
+  "end_lng", "double", "Longitude where ride ended.",
+  "member_casual", "character", "Type of rider: 'casual' or 'member'"
+)
+kable(data_dictionary)
+```
+
+### Download Data
+
+The following code will download any data from the previous 12 months that has not already been downloaded.  A table will then display which files were downloaded and which were already present.
+
+```{r Download Data}
+base_url <- "https://divvy-tripdata.s3.amazonaws.com/"
+file_end <- "-divvy-tripdata.zip"
+this_month <- month(today())
+this_year <- year(today())
+curr_month <- month(add_with_rollback(today(), months(-13)))
+curr_year <- year(add_with_rollback(today(), months(-13)))
+data_files <- list()
+downloaded <- list()
+while ((curr_month != this_month) || (curr_year != this_year)) {
+  if (curr_month == 13) {
+    curr_month = 1
+    curr_year = curr_year + 1
+  } else {
+    filename <- str_c(curr_year, str_pad(curr_month, width=2, "left", pad="0"), file_end)
+    if (!file.exists(filename)) {
+      url <- str_c(base_url, filename)
+      download.file(url, filename)
+      downloaded <- append(downloaded, TRUE)
+    } else {
+      downloaded <- append(downloaded, FALSE)
+    }
+    data_files <- append(data_files, filename)
+    curr_month <- curr_month + 1
+  }
+}
+data_files <- unlist(data_files)
+downloaded <- unlist(downloaded)
+file_tbl <- tibble(file_name = data_files, downloaded = downloaded, already_downloaded = !downloaded)
+# TODO: Figure out how to make the true/false into checks instead.  Perhaps mutate with a unicode check?
+kable(file_tbl, col.names = c('File Name', 'Downloaded', 'Already Downloaded'))
+```
+
+### Read Data
+
+The downloaded data will now be read data into a single table for us to work with.  There are typically over to 5 million observations to read.  It takes a few moments.
+
+```{r}
+data_tbl <- data_files %>% 
+  map_df(~read_csv(.))
+```
+
+```{r}
+data_tbl %>% 
+  ggplot() +
+  geom_bar(mapping = aes(x = rideable_type, fill = member_casual))
+```
+
+### Data integrity
+
+We will not check the integrity of the data.
+
+#### Missing Values
+
+```{r}
+missing_tbl <- tibble(field_name = colnames(data_tbl), na_count = colSums(is.na(data_tbl)))
+kable(missing_tbl, col.names = c("Variable Name", "Number of Missing Values"), caption = "Missing Values per Variable")
+```
+
+```{r}
+missing_station_count <- data_tbl %>% 
+  filter(is.na(start_station_name) | is.na(end_station_name)) %>% 
+  summarize(n())
+```
+There are `r missing_station_count` observations that are missing the end or start station.
+
+As one can see there are quite alot of observations that are missing variables, this is especially true for the starting and ending station variables.
+
+#### Accuracy of Latitude and Longitude Values
+
+```{r}
+station_count <- data_tbl %>% 
+  select(start_station_name) %>% 
+  n_distinct(na.rm = TRUE)
+
+station_lat_lng_tbl <- bind_rows(
+  data_tbl %>% 
+    filter(!is.na(start_station_name)) %>% 
+    mutate(station_name = start_station_name, lat = start_lat, lng = start_lng) %>% 
+    select(station_name, lat, lng),
+  data_tbl %>% 
+    filter(!is.na(end_station_name)) %>% 
+    mutate(station_name = end_station_name, lat = end_lat, lng = end_lng) %>% 
+  select(station_name, lat, lng)
+)
+
+station_lat_lng_variance_tbl <- station_lat_lng_tbl %>% 
+  group_by(station_name) %>% 
+  summarize(min_lat = min(lat), max_lat = max(lat), min_lng = min(lng), max_lng = max(lng))
+
+fuzzy_station_count <- station_lat_lng_variance_tbl %>% 
+  filter(min_lat != max_lat | min_lng != max_lng) %>% 
+  n_distinct()
+
+fuzzy_station_pct = round((fuzzy_station_count / station_count) * 100, digits=2)
+```
+
+`r fuzzy_station_pct`% of the stations have observations that do not always have the same latitude and longitude.  This means that we must treat the latitude and longitude variables as approximate.
+
+```{r}
+lat_lng_delta_tbl <- station_lat_lng_variance_tbl %>% 
+  mutate(lat_delta = abs(min_lat - max_lat), lng_delta = abs(min_lat - max_lat))
+
+lat_lng_scatter <- lat_lng_delta_tbl %>% 
+  ggplot() +
+  geom_point(mapping = aes(x = lat_delta, y = lng_delta), alpha = 0.4)
+lat_lng_scatter
+```
+
+```{r}
+lat_lng_delta_tbl %>% 
+  filter(lat_delta < 0.5) %>% 
+  ggplot() +
+  geom_point(mapping = aes(x = lat_delta, y = lng_delta), alpha = 0.4)
+```
+
+
+```{r}
+mean_lat_lng_delta_tbl <- lat_lng_delta_tbl %>% 
+  filter(lat_delta < 0.5) %>% 
+  summarize(mean_lat_delta = mean(lat_delta), mean_lng_delta = mean(lng_delta))
+lat_lng_eps <- mean(mean_lat_lng_delta_tbl$mean_lat_delta, mean_lat_lng_delta_tbl$mean_lng_delta)
+```
+
+There is a single station with wide range for latitude and longitude.  If we exclude that station the largest difference between latitude and longitude values assigned to the same station is `r lat_lng_eps`.  We will use this value when we approximate a rider borrowing a bike for a round trip, a trip starting and ending a trip in the same location.
+
+### Start and End Times
+
+Fortunately, there are no missing values for the start and end times.  However, there are still some issues in these variables.
+
+#### End times before start times
+
+```{r}
+checkin_before_checkout <- data_tbl %>% 
+  filter(started_at >= ended_at) %>% 
+  count()
+```
+
+There are `r checkin_before_checkout` observations where the end time is *before* the start time.
+
+#### Duration outliers
+
+```{r}
+initial_duration_summary <- data_tbl %>% 
+  filter(started_at < ended_at) %>% 
+  mutate(duration_seconds = ended_at - started_at) %>% 
+  summarize(mn = min(duration_seconds), mdn = median(duration_seconds), mx = max(duration_seconds), iqr = IQR(duration_seconds))
+initial_duration_summary
+```
+
+As we can see there are clearly some outliers, with trips lasting a second to a trip lasting several days.
+
+We can look at the distribution and see a very long tail.
+
+```{r}
+data_tbl %>% 
+  filter(started_at < ended_at) %>% 
+  mutate(duration_seconds = ended_at - started_at) %>% 
+  group_by(duration_seconds) %>% 
+  summarize(count = n()) %>% 
+  ggplot() +
+  geom_freqpoly(mapping = aes(x = duration_seconds))
+```
+
+If we set our maximum trip to 48 hours, or `r 2 * 24 * 60 * 60` seconds, we get the following distribution.
+
+```{r}
+max_trip = 48 * 60 * 60
+data_tbl %>% 
+  filter(started_at < ended_at) %>% 
+  mutate(duration_seconds = ended_at - started_at) %>% 
+  filter(duration_seconds <= max_trip) %>% 
+  group_by(duration_seconds) %>% 
+  summarize(count = n()) %>% 
+  ggplot() +
+  geom_freqpoly(mapping = aes(x = duration_seconds))
+```
+
+```{r}
+high_tail_obs <- (data_tbl %>% 
+  filter(started_at < ended_at) %>% 
+  mutate(duration_seconds = ended_at - started_at) %>% 
+  filter(duration_seconds > max_trip) %>% 
+  count())$n
+```
+
+This still includes a fairly long tail and would only remove `r high_tail_obs` observations.
+
+```{r}
+min_trip = 120
+low_tail_obs <- (data_tbl %>% 
+  filter(started_at < ended_at) %>% 
+  mutate(duration_seconds = ended_at - started_at) %>% 
+  filter(duration_seconds < min_trip) %>% 
+  count())$n
+```
+
+On the low end, we can see that there are thousands of trips that last mere seconds.  If we arbitrarily set the minimum trip duration to be 2 minutes that will remove `r low_tail_obs` observations.
+
+Our final distrubution would be the following.
+
+```{r}
+data_tbl %>% 
+  filter(started_at < ended_at) %>% 
+  mutate(duration_seconds = ended_at - started_at) %>% 
+  filter(duration_seconds >= min_trip, duration_seconds <= max_trip) %>% 
+  group_by(duration_seconds) %>% 
+  summarize(count = n()) %>% 
+  ggplot() +
+  geom_freqpoly(mapping = aes(x = as.integer(duration_seconds)))
+```
+
+### Summary
+
+Given the above, I think we have the following data to work with:
+
+* When trips started and ended (excepting observations where end occurs before start).
+* *Approximately* where trips started and ended.
+* The type of customer that did the borrowing.
+
+The following steps will be take to clean the data:
+
+1. Station name and id columns will be removed.
+2. Any additional observations missing data will be removed.
+3. Observations where the start time is after the end time will be removed.
+4. A trip duration variable will be added.  This will measure the trip duration in seconds.
+5. Observations where the trip duration is less than `r min_trip` seconds and more than `r max_trip` seconds will be removed.
+
+```{r}
+# Clean data
+clean_data_tbl <- data_tbl %>% 
+  select(rideable_type, started_at, ended_at, start_lat, start_lng, end_lat, end_lng, member_casual) %>% 
+  drop_na() %>% 
+  mutate(trip_duration = ended_at - started_at) %>% 
+  filter(started_at < ended_at, trip_duration >= min_trip, trip_duration <= max_trip)
+```
+
+## Analysis
+
+### Trip duration by customer type.
+
+```{r}
+# TODO: Is the difference btween the averages and/or medians statistically significant?
+clean_data_tbl %>% 
+  group_by(member_casual) %>% 
+  summarize(mn = min(trip_duration), avg = mean(trip_duration), mdn = median(trip_duration), mx = max(trip_duration))
+```
+
+## Trip start day by customer type.
+
+```{r}
+# TODO: figure out how to change x/y tick labels.
+clean_data_tbl %>% 
+  mutate(trip_day = wday(started_at)) %>% 
+  ggplot() + 
+  geom_bar(mapping = aes(x = trip_day, fill=member_casual)) +
+  facet_wrap(~member_casual)
+```
+
+## Trip start day and hour by customer.
+
+```{r}
+clean_data_tbl %>% 
+  mutate(start_hour = hour(started_at), start_day = wday(started_at)) %>% 
+  ggplot() +
+  geom_count(mapping = aes(x = start_hour, y = start_day, color = member_casual)) +
+  facet_wrap(~member_casual)
+```
+
+## Round trips vs. straight line trips
+
+We will define a round trip as where the start latitude and longitude are within `r lat_lng_eps` of the end latitude and longitude, respectively.
+
+```{r}
+is_near <- function(x, y) {
+  return(abs(x - y) < lat_lng_eps)
+}
+
+clean_data_tbl %>% 
+  mutate(round_trip = (is_near(start_lat, end_lat) & is_near(start_lng, end_lng))) %>% 
+  group_by(member_casual, round_trip) %>% 
+  summarize(count = n()) %>% 
+  mutate(ratio = round(count / sum(count), 2))
+```
+
+## Trip start location by customer
+
+```{r}
+clean_data_tbl %>% 
+  ggplot() +
+  geom_point(mapping = aes(x = start_lat, y = start_lng), alpha = 0.4)
+```
+
+Once again we find a single outlier that must be removed.
+
+```{r}
+clean_data_tbl %>% 
+  filter(start_lng < -84) %>% 
+  ggplot() +
+  geom_point(mapping = aes(x = start_lat, y = start_lng, color = member_casual), alpha = 0.4) +
+  facet_wrap(~member_casual)
+```
+
+## Type of bike borrowed
+
+```{r}
+clean_data_tbl %>% 
+  group_by(member_casual, rideable_type) %>% 
+  summarize(count = n())
+```
+

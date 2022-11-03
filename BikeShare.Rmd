@@ -1,0 +1,333 @@
+---
+title: "Bike Share Project"
+author: "Joseph Ramaswami"
+date: "2022-10-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE)
+```
+
+## Introduction
+
+Cyclistic is a bike sharing company.  They have three different pricing plans: single day, full-day pass, and annual membership.  Users of the first two plans are referred to as casual riders, the last as members.  Cyclistics financial analysts determined that annual memberships are more profitable.  Lily Moreno, CEO of Cyclistic, would like to know **how do annual members and casual riders use Cyclistic bikes
+differently?**
+
+```{r Setup Environment}
+# Setup our environment.
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(knitr)
+```
+
+## Data
+
+### Source
+
+The data consists of observations about bike trips for four quarters starting in Q2 2019 and ending in Q1 2020.  This data is public data available under this [license](https://ride.divvybikes.com/data-license-agreement).  It can be downloaded from the following [index page](https://divvy-tripdata.s3.amazonaws.com/index.html).  The following four data files are used:
+
+```{r}
+# Download data.
+file_names = c("Divvy_Trips_2019_Q2.zip", "Divvy_Trips_2019_Q3.zip", "Divvy_Trips_2019_Q4.zip", "Divvy_Trips_2020_Q1.zip")
+base_url = "https://divvy-tripdata.s3.amazonaws.com/"
+for (fname in file_names) {
+  if (!file.exists(fname)) {
+    url <- str_c(base_url, fname)
+    download.file(url, fname)
+  }
+}
+
+q2_2019_raw <- read_csv(file_names[1])
+q3_2019_raw <- read_csv(file_names[2])
+q4_2019_raw <- read_csv(file_names[3])
+q1_2020_raw <- read_csv(file_names[4])
+```
+
+```{r}
+kable(tibble(file_names = file_names), col.names=c("File Names"), caption="Data Files")
+```
+
+### Data Preparation
+
+The data available is inconsistent between the four files.  The data will be standardized to contain the following variables:
+
+```{r}
+data_dictionary <- tribble(
+  ~Variable,            ~Type,       ~Description,
+  "ride_id",            "character", "An unique id for a given ride.",
+  "rideable_type",      "character", "Before 2020 this was the id for the bike ridden. After 2020 it is the type of bike ridden.",
+  "started_at",         "date-time", "Date and time the ride started.",
+  "ended_at",           "date-time", "Date and time the ride ended.",
+  "start_station_name", "character", "Name of station where ride started.",
+  "start_station_id",   "number",    "Unique id for station where ride started.",
+  "end_station_name",   "character", "Name of station where ride ended.",
+  "end_station_id",     "number",    "Unique id for station where ride ended.",
+  "member_casual",      "character", "Type of rider: 'member' or 'casual'."
+)
+kable(data_dictionary, col.names = c("Variable", "Datatype", "Description"), caption = "Data Dictionary")
+```
+
+There are several steps required to clean the data.
+
+1. Variables in files from 2019 are renamed to be consistent with those in the 2020 data file.
+
+2. `ride_id` and `rideable_type` in 2019 data files are converted into character data so that they can stack with the new character based variables used in data from 2020 onward.
+
+```{r}
+# Column names for our cleaned data.
+new_colnames = c("ride_id", "rideable_type", "started_at", "ended_at", "start_station_name", "start_station_id", 
+                 "end_station_name", "end_station_id", "member_casual")
+
+# Q2 2019
+q2_colnames = c("01 - Rental Details Rental ID", "01 - Rental Details Bike ID", "01 - Rental Details Local Start Time",
+                "01 - Rental Details Local End Time", "03 - Rental Start Station Name", "03 - Rental Start Station ID",
+                "02 - Rental End Station Name", "02 - Rental End Station ID", "User Type")
+trans_tbl <- tibble(from = q2_colnames, to = new_colnames)
+q2_2019_clean <- q2_2019_raw %>%
+  select(all_of(q2_colnames)) %>% 
+  rename(any_of(setNames(q2_colnames, new_colnames))) %>% 
+  mutate(ride_id = as.character(ride_id), rideable_type = as.character(rideable_type))
+
+# Q3 2019
+q3_colnames = c("trip_id", "bikeid", "start_time", "end_time", "from_station_name", "from_station_id", 
+                "to_station_name", "to_station_id", "usertype")
+q3_2019_clean <- q3_2019_raw %>% 
+  select(all_of(q3_colnames)) %>% 
+  rename(any_of(setNames(q3_colnames, new_colnames))) %>% 
+  mutate(ride_id = as.character(ride_id), rideable_type = as.character(rideable_type))
+
+# Q4 2019
+q4_colnames = q3_colnames  # Q4 names are the same as Q3 names
+q4_2019_clean <- q4_2019_raw %>% 
+  select(all_of(q4_colnames)) %>% 
+  rename(any_of(setNames(q4_colnames, new_colnames))) %>% 
+  mutate(ride_id = as.character(ride_id), rideable_type = as.character(rideable_type))
+
+# Q1 2020
+q1_2020_clean <- q1_2020_raw %>% 
+  select(all_of(new_colnames))
+
+all_trips_raw <- bind_rows(q2_2019_clean, q3_2019_clean, q4_2019_clean, q1_2020_clean)
+```
+
+
+```{r}
+trips_starting_after_ending <- (all_trips_raw %>% 
+  filter(started_at > ended_at) %>% 
+  summarize(count = n()))$count
+```
+
+3. There are observations `r trips_starting_after_ending` trips where `started_at` is *after* `ended_at`.  These observations will be removed.
+
+4. The `member_casual` data must be fixed.  In the 2019 data files, the `member_casual` variable had values of "Subscriber" and "Customer"; these will be replaced with "member" and "casual", respectively.  This is consistent with data gathered from 2020 onward.
+
+```{r, results=FALSE}
+tibble(field_name = colnames(all_trips_raw), na_count = colSums(is.na(all_trips_raw)))
+```
+
+```{r, results=FALSE}
+all_trips_raw %>% 
+  filter(is.na(end_station_name) | is.na(end_station_id)) 
+```
+
+5. A single observation has missing values for the `end_station_name` and the `end_station_id`; this observation will be dropped.
+
+```{r}
+hq_trip_count <- all_trips_raw %>% 
+  mutate(duration_secs = ended_at - started_at) %>% 
+  filter(start_station_name == 'HQ QR' | end_station_name == 'HQ QR') %>% 
+  nrow()
+```
+
+6. The specifications for this project mention bicycles removed for quality control reasons.  They have starting or ending station names of "HQ QR" and there are `r hq_trip_count` observations that will be removed.
+
+```{r}
+all_trips_clean <- all_trips_raw %>% 
+  mutate(member_casual = recode(member_casual, "Subscriber" = "member", "Customer" = "casual")) %>% 
+  filter(started_at < ended_at) %>% 
+  filter(start_station_name != 'HQ QR', end_station_name != 'HQ QR') %>% 
+  drop_na()
+```
+
+
+```{r}
+row_count <- nrow(all_trips_clean)
+```
+
+The resulting clean data set consists of `r row_count` observations.
+
+## Analysis
+
+### Trip start day by rider type.
+
+Overall, member take more trips then casual users.  However, we can see from the figure below that casual members appear to take more of their trips on the weekend, where members take the more trips on weekdays.  This may indicate that members purchase membership because they are commuting by bicycle and are therefore more regular users.
+
+```{r}
+all_trips_clean %>% 
+  mutate(trip_day = wday(started_at)) %>% 
+  ggplot() + 
+  geom_bar(mapping = aes(x = trip_day, fill=member_casual)) +
+  facet_wrap(~member_casual)
+```
+
+### Trip start time by weekday by rider type.
+
+The figure below supports the hypothesis that members are bicycle commuters as we can see an increase in the number of trips in during morning rush hours and a corresponding increase during afternoon rush hours.  This trend is not visible in casual riders who see an increase throughout the day into the afternoon, followed by decreases into the night hours.  The same trend is apparent in member riders on the weekend.
+
+```{r}
+all_trips_clean %>% 
+  mutate(start_hour = hour(started_at), start_day = wday(started_at)) %>% 
+  ggplot() +
+  geom_count(mapping = aes(x = start_hour, y = start_day, color = member_casual)) +
+  facet_wrap(~member_casual)
+```
+
+### Duration of ride by rider type
+
+```{r}
+summary_duration_stats <- all_trips_clean %>% 
+  mutate(duration_secs = ended_at - started_at) %>% 
+  group_by(member_casual) %>% 
+  summarize(mean_duration = mean(duration_secs), 
+            min_duration = min(duration_secs), 
+            q1 = quantile(duration_secs, 0.25), 
+            median_duration = median(duration_secs),
+            q3 = quantile(duration_secs, 0.75), 
+            max_duration = max(duration_secs),
+            iqr = IQR(duration_secs)) %>% 
+  mutate(across(-one_of('member_casual'), as.numeric))
+         
+kable(summary_duration_stats, caption = "Summary Statistics for Duration in Seconds by Rider Type",
+      col.names = c("Member Type", "Mean", "Min", "Q1", "Median", "Q3", "Max", "IQR"))
+```
+
+```{r}
+summary_duration_stats %>% 
+  ggplot(aes(x = member_casual, y = mean_duration, fill=member_casual)) +
+  geom_bar(stat="identity")
+```
+
+As indicated by the table and figure above, it appears that casual riders tend to have rides of longer duration.  This may support the hypothesis that members are bicycle commuters. A possible explanation are that members are not taking extended trips because of the necessity to arrive at work or get home in a timely manner.
+
+### Percent of rides by rider type by station.
+
+```{r}
+unique_station_count <- all_trips_clean %>% 
+  distinct(start_station_name) %>% 
+  nrow()
+```
+
+There are `r unique_station_count` stations in our dataset.  The number of stations makes visualizing differences between stations for each rider type unwieldy.  Instead, we will look for stations with a relatively large difference between the percentage of riders of the given type starting or ending at a station.
+
+```{r}
+eps <- 1
+
+ride_start_by_station_tbl <- inner_join(
+  all_trips_clean %>% 
+    filter(member_casual == 'member') %>% 
+    select(start_station_name) %>% 
+    group_by(start_station_name) %>% 
+    summarize(member_count = n()) %>% 
+    mutate(member_pct = round(100 * member_count / sum(member_count), 2)),
+  all_trips_clean %>% 
+    filter(member_casual == 'casual') %>% 
+    select(start_station_name) %>% 
+    group_by(start_station_name) %>% 
+    summarize(casual_count = n()) %>% 
+    mutate(casual_pct = round(100 * casual_count / sum(casual_count), 2)),
+  by = 'start_station_name'
+)
+
+# Ride percents add up to approximately 100%. (There are rounding errors.)
+total_ride_start_pct_tbl <- ride_start_by_station_tbl %>% 
+  summarize(SMP = sum(member_pct), SCP = sum(casual_pct))
+
+high_delta_start_stations_tbl <- ride_start_by_station_tbl %>% 
+  mutate(delta = abs(member_pct - casual_pct)) %>% 
+  filter(delta > eps) %>%
+  select(start_station_name, member_pct, casual_pct, delta) %>% 
+  arrange(member_pct) 
+
+kable(high_delta_start_stations_tbl, caption = str_glue("Start Stations With More than {eps}% Difference Between Rider Types"),
+      col.names = c("Station Name", "Pct. of Member Rides", "Pct. Of Casual Rides", "Difference"))
+```
+
+```{r}
+ride_end_by_station_tbl <- inner_join(
+  all_trips_clean %>% 
+    filter(member_casual == 'member') %>% 
+    select(end_station_name) %>% 
+    group_by(end_station_name) %>% 
+    summarize(member_count = n()) %>% 
+    mutate(member_pct = round(100 * member_count / sum(member_count), 2)),
+  all_trips_clean %>% 
+    filter(member_casual == 'casual') %>% 
+    select(end_station_name) %>% 
+    group_by(end_station_name) %>% 
+    summarize(casual_count = n()) %>% 
+    mutate(casual_pct = round(100 * casual_count / sum(casual_count), 2)),
+  by = 'end_station_name'
+)
+
+# Ride percents add up to approximately 100%. (There are rounding errors.)
+total_ride_end_pct_tbl <- ride_end_by_station_tbl %>% 
+  summarize(SMP = sum(member_pct), SCP = sum(casual_pct))
+
+high_delta_end_stations_tbl <- ride_end_by_station_tbl %>% 
+  mutate(delta = abs(member_pct - casual_pct)) %>% 
+  filter(delta > eps) %>%
+  select(end_station_name, member_pct, casual_pct, delta) %>% 
+  arrange(member_pct) 
+kable(high_delta_end_stations_tbl, caption = str_glue("End Stations With More than {eps}% Difference Between Rider Types"),
+      col.names = c("Station Name", "Pct. of Member Rides", "Pct. Of Casual Rides", "Difference"))
+```
+
+As seen in the above tables, there are several stations where there is a greater than `r eps`% difference by rider type in the percentage of rides that start or end at the given station.  However, more statistical studies should be undertaken to determine if the differences are significant.
+
+## Supplementary Analysis
+
+Data collected in 2020 includes latitude and longitude for the starting and ending points of each trip. Though a limited sample, I thought it worth looking at the extra data for any possible insights.
+
+### Start and end location by rider type
+
+```{r}
+q1_2020_tbl <- q1_2020_raw %>% 
+  filter(started_at < ended_at) %>% 
+  filter(start_station_name != 'HQ QR', end_station_name != 'HQ QR') %>% 
+  drop_na()
+```
+
+```{r}
+q1_2020_tbl %>% 
+  ggplot() +
+  geom_point(mapping = aes(x = start_lat, y = start_lng, color = member_casual), alpha = 0.4) +
+  facet_wrap(~member_casual)
+```
+
+```{r}
+q1_2020_tbl %>% 
+  ggplot() +
+  geom_point(mapping = aes(x = end_lat, y = end_lng, color = member_casual), alpha = 0.4) +
+  facet_wrap(~member_casual)
+```
+
+Geographically, there does not appear to be any significant difference between where members and casual riders start or end their trips.
+
+## Analysis Summary
+
+1. As indicated by the days a ride starts and the time of day a ride starts, members appear to be bicycle commuters.
+
+2. Casual riders appear to take longer trips than members.
+
+3. There may be some differences in the start and end stations used by members and casual riders but the lack of geographical differences by latitude and longitude indicate that these differences are probably negligible.
+
+
+## Recommendations
+
+1. I think that Cyclistic should target bicycle commuters that are still casual riders in an effort to convert them into members.  
+
+2. It might be possible to partner with large companies in the area to make their employees aware of the possibility of bicycle commuting.  
+
+3. In addition, perhaps some kind of advertising at bike stations during rush hours would also be opportune.
