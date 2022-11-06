@@ -20,6 +20,7 @@ library(tidyverse)
 library(lubridate)
 library(stringr)
 library(knitr)
+library(scales)
 ```
 
 ## Data
@@ -166,9 +167,12 @@ Overall, member take more trips then casual users.  However, we can see from the
 
 ```{r}
 all_trips_clean %>% 
-  mutate(trip_day = wday(started_at)) %>% 
-  ggplot() + 
-  geom_bar(mapping = aes(x = trip_day, fill=member_casual)) +
+  mutate(trip_day = wday(started_at, label=TRUE)) %>% 
+  group_by(member_casual, trip_day) %>% 
+  summarize(count = n()) %>% 
+  ggplot() +
+  geom_col(mapping = aes(x = trip_day, y = count, fill = member_casual)) +
+  scale_y_continuous(labels = unit_format(scale = 1e-5)) +
   facet_wrap(~member_casual)
 ```
 
