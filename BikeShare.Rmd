@@ -216,7 +216,10 @@ kable(summary_duration_stats, caption = "Summary Statistics for Duration in Seco
 ```{r}
 summary_duration_stats %>% 
   ggplot(aes(x = member_casual, y = mean_duration, fill=member_casual)) +
-  geom_bar(stat="identity")
+  geom_bar(stat="identity") +
+  xlab("Customer Type") +
+  ylab("Mean Ride Duration") +
+  labs(fill = "Customer Type")
 ```
 
 As indicated by the table and figure above, it appears that casual riders tend to have rides of longer duration.  This may support the hypothesis that members are bicycle commuters. A possible explanation are that members are not taking extended trips because of the necessity to arrive at work or get home in a timely manner.
