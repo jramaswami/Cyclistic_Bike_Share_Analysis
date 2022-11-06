@@ -316,14 +316,20 @@ q1_2020_tbl <- q1_2020_raw %>%
 q1_2020_tbl %>% 
   ggplot() +
   geom_point(mapping = aes(x = start_lat, y = start_lng, color = member_casual), alpha = 0.4) +
-  facet_wrap(~member_casual)
+  facet_wrap(~member_casual) +
+  xlab("Latitude") +
+  ylab("Longitude") +
+  labs(title = "Start Location", color = "Customer Type")
 ```
 
 ```{r}
 q1_2020_tbl %>% 
   ggplot() +
   geom_point(mapping = aes(x = end_lat, y = end_lng, color = member_casual), alpha = 0.4) +
-  facet_wrap(~member_casual)
+  facet_wrap(~member_casual) +
+  xlab("Latitude") +
+  ylab("Longitude") +
+  labs(title = "End Location", color = "Customer Type")
 ```
 
 Geographically, there does not appear to be any significant difference between where members and casual riders start or end their trips.
