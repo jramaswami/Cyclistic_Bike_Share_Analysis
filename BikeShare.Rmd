@@ -185,10 +185,13 @@ The figure below supports the hypothesis that members are bicycle commuters as w
 
 ```{r}
 all_trips_clean %>% 
-  mutate(start_hour = hour(started_at), start_day = wday(started_at)) %>% 
+  mutate(start_hour = hour(started_at), start_day = wday(started_at, label = TRUE)) %>% 
   ggplot() +
   geom_count(mapping = aes(x = start_hour, y = start_day, color = member_casual)) +
-  facet_wrap(~member_casual)
+  facet_wrap(~member_casual) +
+  xlab("Hour") +
+  ylab("Day") +
+  labs(color = "Customer Type", size = "Count")
 ```
 
 ### Duration of ride by rider type
