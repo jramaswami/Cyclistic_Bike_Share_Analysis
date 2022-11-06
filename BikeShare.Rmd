@@ -173,7 +173,10 @@ all_trips_clean %>%
   ggplot() +
   geom_col(mapping = aes(x = trip_day, y = count, fill = member_casual)) +
   scale_y_continuous(labels = unit_format(scale = 1e-5)) +
-  facet_wrap(~member_casual)
+  facet_wrap(~member_casual) +
+  ylab("Count") +
+  xlab("Day") +
+  labs(fill = "Customer Type")
 ```
 
 ### Trip start time by weekday by rider type.
