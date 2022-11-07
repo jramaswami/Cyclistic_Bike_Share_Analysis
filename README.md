@@ -1,3 +1,5 @@
 # Bike Share Project
 
 This is my version of the Google Analytics Capstone Project to analyse bike share data.  A description of the project can be found [here](https://d18ky98rnyall9.cloudfront.net/aacF81H_TsWnBfNR_x7FIg_36299b28fa0c4a5aba836111daad12f1_DAC8-Case-Study-1.pdf?Expires=1667606400&Signature=Odf1z3bWVMgTl85HkDgyO1C0WGQ9~ZSKgBygrC3dLvgFif3oeYTFSUhkLrwPETz~UaqISIHf7XJ-bqaKZ7L~VnjL3RQG142-EELsYMmLQYwnL3xRtB8dgwRWPJQ0iVIW5BHmDDKfw7Y5XAofUdwNKuYzvcXeeuTdCQyfjxSE7k8_&Key-Pair-Id=APKAJLTNE6QMUY6HBC5A).  This description included a link to [sample analysis in R](https://docs.google.com/document/d/1TTj5KNKf4BWvEORGm10oNbpwTRk1hamsWJGj6qRWpuI/edit).  I chose not to just copy and paste to complete this project.  Instead I completed the intended deliverables without much reference to the sample R script.  An important difference between my analysis and the sample provided is that my analysis is in R Markdown, allowing the generation of a report for communicating the results.
+
+This project has been [published on RPubs](https://rpubs.com/jramaswami/bikeshare).
